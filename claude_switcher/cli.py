@@ -38,19 +38,21 @@ def cmd_list(args) -> int:
         print("No accounts saved yet. Log in with `claude`, then run `csw add`.")
         return 0
     cur = core.active_uuid()
-    print(f"{'':2}{'#':>2}  {'account':<34} {'plan':<6} {'5h':>5} {'resets':>7} {'7d':>5} {'resets':>7}")
-    for i, a in enumerate(reg["accounts"], 1):
-        name = a["email"] + (f" ({a['alias']})" if a.get("alias") else "")
+    names = [a["email"] + (f" ({a['alias']})" if a.get("alias") else "") for a in reg["accounts"]]
+    w = max(len("account"), *map(len, names))  # widest name sets the column
+    print(f"{'':2}{'#':>2}  {'account':<{w}}  {'plan':<6} {'5h':>5} {'resets':>7} {'7d':>5} {'resets':>7}")
+    for i, (a, name) in enumerate(zip(reg["accounts"], names), 1):
         mark = "* " if a["uuid"] == cur else "  "
+        row = f"{mark}{i:>2}  {name:<{w}}  {a.get('plan', ''):<6}"
         if args.no_usage:
-            print(f"{mark}{i:>2}  {name:<34} {a.get('plan', ''):<6}")
+            print(row)
             continue
         try:
             u = core.usage_for(a["uuid"])
             (p5, r5), (p7, r7) = u["five_hour"], u["seven_day"]
-            print(f"{mark}{i:>2}  {name:<34} {a.get('plan', ''):<6} {p5:>4.0f}% {_until(r5):>7} {p7:>4.0f}% {_until(r7):>7}")
+            print(f"{row} {p5:>4.0f}% {_until(r5):>7} {p7:>4.0f}% {_until(r7):>7}")
         except api.ApiError as e:
-            print(f"{mark}{i:>2}  {name:<34} {a.get('plan', ''):<6} usage unavailable: {e}")
+            print(f"{row} usage unavailable: {e}")
     if cur and not any(a["uuid"] == cur for a in reg["accounts"]):
         print("\nThe account Claude Code is using now is not saved. Run `csw add` to save it.")
     return 0
