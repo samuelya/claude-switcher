@@ -1,0 +1,30 @@
+[project]
+name = "claude-switcher"
+version = "0.1.0"
+description = "Switch Claude Code between accounts, by hand or when a usage limit is near"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+dependencies = []
+keywords = ["claude", "claude-code", "cli", "accounts"]
+classifiers = [
+    "Environment :: Console",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+]
+
+[project.urls]
+Homepage = "https://github.com/samuelya/claude-switcher"
+Issues = "https://github.com/samuelya/claude-switcher/issues"
+
+[project.scripts]
+csw = "claude_switcher.cli:main"
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["claude_switcher"]
