@@ -4,8 +4,6 @@
 
 `csw` switches Claude Code between several Claude accounts. You can switch by hand, or leave `csw auto` running so that it moves to another account when the current one nears its usage limit. The tool uses only the Python standard library.
 
-The design follows [realiti4/claude-swap](https://github.com/realiti4/claude-swap) (MIT licence) but keeps only the core features: saving accounts, switching manually and switching automatically. No code is copied from claude-swap. `csw` uses the same Claude Code storage locations, endpoints and OAuth client ID.
-
 > **Before you use this tool:** using several accounts to work around usage limits may conflict with Anthropic's [Consumer Terms](https://www.anthropic.com/legal/consumer-terms) or [Usage Policy](https://www.anthropic.com/legal/aup), and could put your accounts at risk. You are responsible for checking the current terms and complying with them. This project is not affiliated with or endorsed by Anthropic.
 
 ## Supported platforms
@@ -84,7 +82,7 @@ Usage comes from `https://api.anthropic.com/api/oauth/usage`, the endpoint Claud
 - The usage endpoint and token format are internal to Claude Code and are not a documented public API. A future Claude Code release could change them and break this tool.
 - `csw` does not refresh the active account's token, because Claude Code refreshes that token itself and two refreshes of the same token would invalidate one of them. If the live token has expired, usage for the active account shows as unavailable until Claude Code makes its next request.
 - When you switch away from an account, `csw` saves that account's latest tokens. However, a Claude Code process that is still running with the old account can refresh the token later. The saved copy then becomes invalid, and you need to `/login` to that account again and run `csw add`.
-- `csw` writes `~/.claude.json` with a read, modify and replace sequence. It does not take Claude Code's file lock, so a write by Claude Code at the same moment could be lost. The original tool handles this case and `csw` does not.
+- `csw` writes `~/.claude.json` with a read, modify and replace sequence. It does not take Claude Code's file lock, so a write by Claude Code at the same moment could be lost.
 - Setup tokens from `claude setup-token` and API key logins are not supported, because the usage endpoint does not accept them.
 - `CLAUDE_CONFIG_DIR` is not supported. Only the default Claude Code profile is switched.
 
