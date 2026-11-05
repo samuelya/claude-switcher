@@ -12,6 +12,8 @@ service name on macOS, or 0600 files under ~/.claude-switcher/creds elsewhere.
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import getpass
 import json
 import os
@@ -27,6 +29,7 @@ CLAUDE_JSON = HOME / ".claude.json"
 CLAUDE_CREDS_FILE = HOME / ".claude" / ".credentials.json"
 APP_DIR = Path(os.environ.get("CSW_HOME", HOME / ".claude-switcher"))
 REGISTRY = APP_DIR / "accounts.json"
+LOCK = APP_DIR / ".refresh.lock"
 
 CC_SERVICE = "Claude Code-credentials"
 OUR_SERVICE = "claude-switcher"
@@ -177,6 +180,22 @@ def registry_get() -> dict:
 
 def registry_set(reg: dict) -> None:
     atomic_write(REGISTRY, json.dumps(reg, indent=2))
+
+
+@contextlib.contextmanager
+def lock():
+    """Serialise token refreshes across csw processes.
+
+    A refresh rotates the refresh token, so two processes refreshing the same
+    saved account at once would leave one of them holding a dead token.
+    """
+    LOCK.parent.mkdir(parents=True, exist_ok=True)
+    with open(LOCK, "a") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
 
 
 def now() -> float:

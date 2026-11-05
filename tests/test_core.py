@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from claude_switcher import api, core
+from claude_switcher import api, cli, core
 from claude_switcher import storage as st
 
 FUTURE = int(time.time() * 1000) + 3_600_000
@@ -33,6 +33,7 @@ class FakeStore(unittest.TestCase):
         self.usage_by_token = {}
         patches = [
             mock.patch.object(st, "REGISTRY", tmp / "accounts.json"),
+            mock.patch.object(st, "LOCK", tmp / ".refresh.lock"),
             mock.patch.object(st, "live_creds_get", lambda: self.live),
             mock.patch.object(st, "live_creds_set", lambda d: setattr(self, "live", d)),
             mock.patch.object(st, "config_get", lambda: self.config),
@@ -42,6 +43,7 @@ class FakeStore(unittest.TestCase):
             mock.patch.object(st, "saved_set", lambda k, v: self.saved.__setitem__(k, v)),
             mock.patch.object(st, "saved_delete", lambda k: self.saved.pop(k, None)),
             mock.patch.object(api, "usage", lambda tok: self.usage_by_token[tok]),
+            mock.patch.object(api, "refresh", mock.Mock(side_effect=AssertionError("unexpected network refresh"))),
             mock.patch.object(core, "notify", lambda *a: None),
         ]
         for p in patches:
@@ -131,6 +133,69 @@ class AutoTick(FakeStore):
     def test_all_exhausted(self):
         self.usage_by_token = {"at-a": u(95, 0), "at-b": u(92, 0), "at-c": u(0, 99)}
         self.assertEqual(core.auto_tick(90, 300).status, "exhausted")
+
+
+class Exec(FakeStore):
+    BASE = {"PATH": "/usr/bin", "HOME": "/home/x", "ANTHROPIC_API_KEY": "sk-other",
+            "CLAUDE_CODE_OAUTH_TOKEN": "at-stale"}
+
+    def refresh_to(self, token):
+        return mock.patch.object(api, "refresh", lambda o: {**o, "accessToken": token,
+                                                             "refreshToken": f"rt-{token}",
+                                                             "expiresAt": FUTURE * 2})
+
+    def test_inactive_account_gets_its_token_and_other_auth_is_removed(self):
+        self.saved["b"]["claudeAiOauth"]["expiresAt"] = FUTURE * 2
+        env = core.exec_env("b", self.BASE)
+        self.assertEqual(env["CLAUDE_CODE_OAUTH_TOKEN"], "at-b")
+        self.assertNotIn("ANTHROPIC_API_KEY", env)
+        self.assertEqual(env["PATH"], "/usr/bin")
+
+    def test_global_login_is_untouched(self):
+        self.saved["b"]["claudeAiOauth"]["expiresAt"] = FUTURE * 2
+        core.exec_env("b", self.BASE)
+        self.assertEqual(self.live["claudeAiOauth"]["accessToken"], "at-a")
+        self.assertEqual(self.config["oauthAccount"]["accountUuid"], "a")
+
+    def test_token_with_under_an_hour_left_is_refreshed_and_saved(self):
+        self.saved["b"]["claudeAiOauth"]["expiresAt"] = int(time.time() * 1000) + 30 * 60 * 1000
+        with self.refresh_to("at-new"):
+            env = core.exec_env("b", self.BASE)
+        self.assertEqual(env["CLAUDE_CODE_OAUTH_TOKEN"], "at-new")
+        self.assertEqual(self.saved["b"]["claudeAiOauth"]["refreshToken"], "rt-at-new")
+
+    def test_active_account_uses_claude_codes_own_login(self):
+        env = core.exec_env("a", self.BASE)
+        self.assertNotIn("CLAUDE_CODE_OAUTH_TOKEN", env)  # stale token from a parent exec is dropped
+        self.assertNotIn("ANTHROPIC_API_KEY", env)
+
+    def test_missing_saved_credentials(self):
+        del self.saved["b"]
+        with self.assertRaises(core.SwitchError):
+            core.exec_env("b", self.BASE)
+
+    def run_cli(self, *argv):
+        with mock.patch.object(cli.os, "execvpe") as ex, mock.patch.object(core, "exec_env", lambda u, b: {"U": u}):
+            cli.main(["exec", *argv])
+        return ex.call_args.args
+
+    def test_cli_passes_command_and_flags_through(self):
+        file, argv, env = self.run_cli("2", "--", "claude", "-p", "--model", "claude-fable-5-1", "hi")
+        self.assertEqual(argv, ["claude", "-p", "--model", "claude-fable-5-1", "hi"])
+        self.assertEqual((file, env), ("claude", {"U": "b"}))
+
+    def test_cli_without_separator_or_command(self):
+        self.assertEqual(self.run_cli("2", "claude", "-p", "hi")[1], ["claude", "-p", "hi"])
+        self.assertEqual(self.run_cli("2")[1], ["claude"])
+
+
+class Lock(unittest.TestCase):
+    def test_lock_is_reentrant_across_calls(self):
+        with mock.patch.object(st, "LOCK", Path(tempfile.mkdtemp()) / "x" / ".lock"):
+            with st.lock():
+                pass
+            with st.lock():
+                pass
 
 
 if __name__ == "__main__":

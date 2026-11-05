@@ -32,8 +32,8 @@ def _call(req: urllib.request.Request) -> dict:
         raise ApiError(None, f"network error: {e}") from None
 
 
-def needs_refresh(oauth: dict) -> bool:
-    return oauth.get("expiresAt", 0) - time.time() * 1000 < REFRESH_MARGIN_MS
+def needs_refresh(oauth: dict, margin_ms: int = REFRESH_MARGIN_MS) -> bool:
+    return oauth.get("expiresAt", 0) - time.time() * 1000 < margin_ms
 
 
 def refresh(oauth: dict) -> dict:

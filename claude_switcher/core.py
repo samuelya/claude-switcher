@@ -1,4 +1,4 @@
-"""Account operations: add, remove, switch, usage, and the auto-switch tick."""
+"""Account operations: add, remove, switch, usage, exec, and the auto-switch tick."""
 
 from __future__ import annotations
 
@@ -64,6 +64,22 @@ def remove(target: str) -> dict:
     return entry
 
 
+# ------------------------------------------------------------ saved tokens
+
+def _fresh_saved(uuid: str, margin_ms: int = api.REFRESH_MARGIN_MS) -> dict | None:
+    """Saved blob for an inactive account, refreshed if it expires within margin_ms.
+
+    Reads inside the lock, so a token another csw process has just rotated is
+    picked up instead of being refreshed a second time.
+    """
+    with st.lock():
+        blob = st.saved_get(uuid)
+        if blob and api.needs_refresh(blob["claudeAiOauth"], margin_ms):
+            blob["claudeAiOauth"] = api.refresh(blob["claudeAiOauth"])
+            st.saved_set(uuid, blob)
+        return blob
+
+
 # ------------------------------------------------------------------- switch
 
 def _snapshot_active(reg: dict) -> None:
@@ -85,15 +101,10 @@ def switch_to(uuid: str) -> None:
     reg = st.registry_get()
     if uuid == active_uuid():
         return
-    blob = st.saved_get(uuid)
+    blob = _fresh_saved(uuid)
     if not blob:
         raise SwitchError("saved credentials are missing; log in to that account and `csw add` again")
-
     oauth = blob["claudeAiOauth"]
-    if api.needs_refresh(oauth):
-        oauth = api.refresh(oauth)
-        blob["claudeAiOauth"] = oauth
-        st.saved_set(uuid, blob)
 
     _snapshot_active(reg)
 
@@ -120,15 +131,36 @@ def usage_for(uuid: str) -> dict:
             raise api.ApiError(None, "live token expired; Claude Code refreshes it on its next request")
         return api.usage(oauth["accessToken"])
 
-    blob = st.saved_get(uuid)
+    blob = _fresh_saved(uuid)
     if not blob:
         raise api.ApiError(None, "saved credentials missing")
-    oauth = blob["claudeAiOauth"]
-    if api.needs_refresh(oauth):
-        oauth = api.refresh(oauth)
-        blob["claudeAiOauth"] = oauth
-        st.saved_set(uuid, blob)
-    return api.usage(oauth["accessToken"])
+    return api.usage(blob["claudeAiOauth"]["accessToken"])
+
+
+# --------------------------------------------------------------------- exec
+
+EXEC_MIN_VALID_MS = 60 * 60 * 1000  # a child cannot refresh, so start it with an hour or more
+TOKEN_VAR = "CLAUDE_CODE_OAUTH_TOKEN"
+# Variables that would make the child authenticate as someone else.
+CONFLICTING_AUTH = (TOKEN_VAR, "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR",
+                    "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+
+
+def exec_env(uuid: str, base: dict[str, str]) -> dict[str, str]:
+    """Environment for a child process that should run as the given account.
+
+    The child gets an access token only. It cannot rotate the refresh token,
+    so the copy csw saved stays valid. For the active account the token
+    variables are removed and the child uses Claude Code's own login.
+    """
+    env = {k: v for k, v in base.items() if k not in CONFLICTING_AUTH}
+    if uuid == active_uuid():
+        return env
+    blob = _fresh_saved(uuid, EXEC_MIN_VALID_MS)
+    if not blob:
+        raise SwitchError("saved credentials are missing; log in to that account and `csw add` again")
+    env[TOKEN_VAR] = blob["claudeAiOauth"]["accessToken"]
+    return env
 
 
 def score(u: dict) -> float:
