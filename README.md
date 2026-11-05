@@ -62,6 +62,25 @@ csw disable personal              # leave an account out of automatic switching
 
 Each check reads the active account's 5-hour and 7-day usage and takes the higher of the two. When that figure reaches the threshold, `csw` reads usage for the other enabled accounts and switches to the one with the lowest figure below the threshold. A five-minute cooldown (`--cooldown`) prevents repeated switching between accounts that are all close to the limit. If no account has headroom, `csw` stays on the current account and reports this. On macOS, each switch also raises a desktop notification.
 
+## Run one command as another account
+
+`csw exec` runs a command as a saved account without switching Claude Code's login. Sessions that are already running keep their account, and the command's account applies only to that command and the processes it starts.
+
+```sh
+csw exec personal                    # an interactive Claude Code session as "personal"
+csw exec personal -- claude -p "Summarise CHANGELOG.md" --model claude-fable-5-1
+```
+
+With no command, `csw exec` starts `claude`. The `--` separator is optional. It makes it clear where the `csw` arguments end.
+
+For an inactive account, `csw` refreshes the saved token when less than an hour of it is left. It then passes the access token to the command in `CLAUDE_CODE_OAUTH_TOKEN`. The command receives the access token only, never the refresh token, so it cannot invalidate the copy `csw` keeps. Claude Code removes this variable from the environment of the commands its own tools run. For the active account, `csw` runs the command with Claude Code's normal login.
+
+`csw` also removes `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and any inherited `CLAUDE_CODE_OAUTH_TOKEN` from the command's environment, so the account you name is the one that is used.
+
+A common use is to let a session on one account hand a task to a model that only another account can use. The child process cannot see the parent conversation, so the prompt must contain everything the task needs. A headless run cannot ask for permission, so pass the tools it may use with `--allowedTools`. Put the prompt before `--allowedTools`, because that option takes several values and would otherwise treat the prompt as one of them.
+
+The command runs under the other account's terms and data settings. Do not use it for work that must stay under the first account, such as client work on a business account.
+
 ## How it works
 
 Claude Code stores the logged-in account in two places:
@@ -71,11 +90,11 @@ Claude Code stores the logged-in account in two places:
 | OAuth tokens (`claudeAiOauth`) | Keychain item `Claude Code-credentials` | `~/.claude/.credentials.json` |
 | Account identity (`oauthAccount`) | `~/.claude.json` | `~/.claude.json` |
 
-A switch replaces only those two values. Other data in the same places, such as MCP server logins and your Claude Code settings, stays as it is.
+A switch replaces only those two values; `csw exec` changes neither. Other data in the same places, such as MCP server logins and your Claude Code settings, stays as it is.
 
 `csw` keeps its saved copies in the Keychain under the service `claude-switcher` on macOS, or in `~/.claude-switcher/creds/` with file mode 0600 on Linux. The account list is in `~/.claude-switcher/accounts.json`, which holds no secrets.
 
-Usage comes from `https://api.anthropic.com/api/oauth/usage`, the endpoint Claude Code uses for its own `/usage` view. Inactive accounts refresh their tokens through Claude Code's OAuth client when needed. Each refresh issues a new refresh token, so `csw` saves it straight away.
+Usage comes from `https://api.anthropic.com/api/oauth/usage`, the endpoint Claude Code uses for its own `/usage` view. Inactive accounts refresh their tokens through Claude Code's OAuth client when needed. Each refresh issues a new refresh token, so `csw` saves it straight away. A lock file in `~/.claude-switcher` stops two `csw` processes from refreshing the same account at once.
 
 ## Limitations
 
@@ -85,6 +104,8 @@ Usage comes from `https://api.anthropic.com/api/oauth/usage`, the endpoint Claud
 - `csw` writes `~/.claude.json` with a read, modify and replace sequence. It does not take Claude Code's file lock, so a write by Claude Code at the same moment could be lost.
 - Setup tokens from `claude setup-token` and API key logins are not supported, because the usage endpoint does not accept them.
 - `CLAUDE_CONFIG_DIR` is not supported. Only the default Claude Code profile is switched.
+- A command started with `csw exec` cannot refresh its own token. If it runs for longer than the token lasts (at least one hour from the start), its requests fail with an authentication error.
+- `csw exec` does not change `~/.claude.json`, so Claude Code may show the email of the global login, for example in `/status`, while its requests use the account you named. This display has not yet been checked in an interactive session.
 
 ## Tests
 

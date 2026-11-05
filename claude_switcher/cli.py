@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
 from datetime import datetime, timezone
@@ -126,6 +127,19 @@ def cmd_toggle(args) -> int:
     return 0
 
 
+def cmd_exec(args) -> int:
+    entry = core.find(st.registry_get(), args.target)
+    command = args.command[1:] if args.command[:1] == ["--"] else args.command
+    command = command or ["claude"]
+    env = core.exec_env(entry["uuid"], dict(os.environ))
+    print(f"csw: running {command[0]} as {entry['email']}", file=sys.stderr, flush=True)
+    try:
+        os.execvpe(command[0], command, env)  # replaces csw; exit code and signals pass through
+    except OSError as e:
+        print(f"error: cannot run {command[0]}: {e.strerror}", file=sys.stderr)
+        return 127
+
+
 def cmd_auto(args) -> int:
     print(f"Auto-switch: threshold {args.threshold:.0f}%, check every {args.interval}s, "
           f"cooldown {args.cooldown}s{', dry run' if args.dry_run else ''}. Ctrl-C to stop.", flush=True)
@@ -175,6 +189,13 @@ def main(argv: list[str] | None = None) -> int:
         s = sub.add_parser(name, help=f"{name} an account for auto-switch")
         s.add_argument("target")
         s.set_defaults(fn=cmd_toggle)
+
+    s = sub.add_parser("exec", help="run a command (default: claude) as an account, leaving the login alone",
+                       description="Run a command as a saved account without switching Claude Code's login. "
+                                   "Example: csw exec personal -- claude -p --model claude-fable-5-1 'hello'")
+    s.add_argument("target", help="list number, alias or email")
+    s.add_argument("command", nargs=argparse.REMAINDER, help="command to run (default: claude)")
+    s.set_defaults(fn=cmd_exec)
 
     s = sub.add_parser("auto", help="watch usage and switch when the limit is near")
     s.add_argument("--threshold", type=float, default=90, help="switch at this usage %% (default 90)")
